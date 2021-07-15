@@ -17,25 +17,27 @@ using std::thread;
 #pragma comment(lib, "ws2_32.lib")
 
 class Server;
+SOCKET server;
 void recvMess(const Server &);
 
 class Server
 {
-    SOCKET server;
     SOCKET client;
     sockaddr_in serverAddr;
     sockaddr_in clientAddr;
-    friend void recvMess(const Server &); //receive message from client
+    // friend void recvMess(const Server &); //receive message from client
 public:
     Server();                  //initialize socket(including wsa)
     ~Server();                 //close socket
     void InitServer(int port); //fulfill the information
     void Listen();             //Listen and wait for client connection
     void sendMess();           //send message to client
-    void close();              //close the connection
+    void recvMess();           //receive message from client
+    void Close();              //close the connection
+    void send_heart();         //send heart data check if the connection is down
 
 private:
-    void Recv() const;
+    void Recv();
     void Send(string data);
 };
 
@@ -46,6 +48,8 @@ Server::Server()
     if (WSAStartup(sockVersion, &wsaData) != 0)
     {
         printf("can't not start up wsa, please check your socket version\n");
+        perror("wsaStartup");
+        WSACleanup();
         return;
     }
     if ((server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
@@ -53,6 +57,7 @@ Server::Server()
         perror("socket");
         return;
     }
+    printf("init Server socket successfully\n");
 }
 
 Server::~Server()
@@ -60,6 +65,7 @@ Server::~Server()
     if (server != INVALID_SOCKET)
         closesocket(server);
     WSACleanup();
+    printf("Server has disconnected\n");
 }
 
 void Server::InitServer(int port)
@@ -76,6 +82,7 @@ void Server::InitServer(int port)
 
 void Server::Listen()
 {
+    printf("server listening..\n");
     if (listen(server, 5) == SOCKET_ERROR)
     {
         perror("listen");
@@ -92,45 +99,61 @@ void Server::Listen()
 
 void Server::sendMess()
 {
-    string data;
-    printf("you: ");
-    getline(cin, data);
-    Send(data);
+    while (1)
+    {
+        string data;
+        getline(cin, data);
+        if (data == "./exit")
+        {
+            printf("close the connection\n");
+            return;
+        }
+        Send(data);
+    }
 }
 
 void Server::Send(string data)
 {
     const char *mess = data.c_str();
-    if (send(client, mess, sizeof(mess), 0) == SOCKET_ERROR)
+    if (send(client, mess, strlen(mess), 0) == SOCKET_ERROR)
     {
-        printf("can't not send the message,please check the sockAddr information\n");
+        if (client == INVALID_SOCKET)
+            printf("the connection has closed\n");
+        else
+            printf("can't not send the message,please check the sockAddr information\n");
         return;
     }
 }
 
-void recvMess(const Server &myServer)
+void Server::recvMess()
 {
     while (1)
     {
-        if (myServer.server == INVALID_SOCKET)
+        if (server == INVALID_SOCKET)
             break;
-        myServer.Recv();
+        Recv();
     }
 }
 
-void Server::Recv() const
+void Server::Recv()
 {
     char data[1024];
     int ret;
+    memset(data, 0, sizeof(data));
     while ((ret = recv(client, data, sizeof(data), 0)) <= 0)
     {
+        if (server == INVALID_SOCKET)
+        {
+            printf("stop receiving from client\n");
+            return;
+        }
         Sleep(1);
     }
     data[ret] = 0x00;
     printf("Friend: %s\n", data);
 }
 
-void Server::close()
+void Server::Close()
 {
     if (server != INVALID_SOCKET)
         closesocket(server);
@@ -141,9 +164,9 @@ int main()
     Server myServer;
     myServer.InitServer(5005);
     myServer.Listen();
-    thread t(recvMess, myServer);
+    thread t(&Server::recvMess, &myServer);
     myServer.sendMess();
+    myServer.Close();
     t.join();
-    myServer.close();
     return 0;
 }
