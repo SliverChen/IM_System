@@ -4,28 +4,40 @@
  * Date: 2021 / 7 / 9
  * ******************/
 
+#include "Serialize.h"
+#include <future>
 #include <iostream>
 #include <stdio.h>
-#include <string>
 #include <thread>
 #include <winsock2.h>
 using std::cin;
+using std::future;
 using std::getline;
-using std::string;
+using std::promise;
 using std::thread;
 
 #pragma comment(lib, "ws2_32.lib")
 
-class Server;
-SOCKET server;
-void recvMess(const Server &);
+//heart-package signal
+#define CONNECT_OK 0
+#define CONNECT_CLOSE 1
+
+//data-package signal
+#define MESSAGE 1
+#define HEARTCHECK 0
 
 class Server
 {
+    SOCKET server;
     SOCKET client;
     sockaddr_in serverAddr;
     sockaddr_in clientAddr;
-    // friend void recvMess(const Server &); //receive message from client
+    struct Package
+    {
+        int header;
+        string mess;
+    };
+
 public:
     Server();                  //initialize socket(including wsa)
     ~Server();                 //close socket
@@ -37,8 +49,12 @@ public:
     void send_heart();         //send heart data check if the connection is down
 
 private:
+    bool isConnected;       //check if is connected
+    future<int> fuResult;   //thread connection
+    promise<int> myPromise; //set the data structure of the heart-data
+private:
     void Recv();
-    void Send(string data);
+    void Send(Package);
 };
 
 Server::Server()
@@ -57,13 +73,18 @@ Server::Server()
         perror("socket");
         return;
     }
+    isConnected = false;
+    fuResult = myPromise.get_future();
     printf("init Server socket successfully\n");
 }
 
 Server::~Server()
 {
     if (server != INVALID_SOCKET)
+    {
         closesocket(server);
+        isConnected = false;
+    }
     WSACleanup();
     printf("Server has disconnected\n");
 }
@@ -94,6 +115,8 @@ void Server::Listen()
         perror("connect");
         return;
     }
+    isConnected = true;
+    myPromise.set_value(CONNECT_OK);
     printf("successfully connect with %s \r\n", inet_ntoa(clientAddr.sin_addr));
 }
 
@@ -101,19 +124,29 @@ void Server::sendMess()
 {
     while (1)
     {
+        if (!isConnected || fuResult.get() == CONNECT_CLOSE)
+        {
+            printf("the connection has shut\n");
+            return;
+        }
         string data;
         getline(cin, data);
+
         if (data == "./exit")
         {
             printf("close the connection\n");
             return;
         }
-        Send(data);
+        Package package;
+        package.header = MESSAGE;
+        package.mess = data;
+        Send(package);
     }
 }
 
-void Server::Send(string data)
+void Server::Send(Package myPackage)
 {
+    string data = myPackage.mess;
     const char *mess = data.c_str();
     if (send(client, mess, strlen(mess), 0) == SOCKET_ERROR)
     {
@@ -129,8 +162,11 @@ void Server::recvMess()
 {
     while (1)
     {
-        if (server == INVALID_SOCKET)
-            break;
+        if (fuResult.get() == CONNECT_CLOSE)
+        {
+            printf("the connection has shut\n");
+            return;
+        }
         Recv();
     }
 }
@@ -157,6 +193,20 @@ void Server::Close()
 {
     if (server != INVALID_SOCKET)
         closesocket(server);
+    isConnected = false;
+    myPromise.set_value(1);
+}
+
+void Server::send_heart()
+{
+    const char data[1024] = "check\0";
+    while (send(client, data, strlen(data), 0) != SOCKET_ERROR)
+    {
+        //need to check errno
+        Sleep(1000);
+    }
+    isConnected = false;
+    myPromise.set_value(CONNECT_CLOSE);
 }
 
 int main()
@@ -164,9 +214,11 @@ int main()
     Server myServer;
     myServer.InitServer(5005);
     myServer.Listen();
-    thread t(&Server::recvMess, &myServer);
+    thread t1(&Server::recvMess, &myServer);
+    t1.detach();
+    thread t2(&Server::send_heart, &myServer);
+    t2.detach();
     myServer.sendMess();
     myServer.Close();
-    t.join();
     return 0;
 }

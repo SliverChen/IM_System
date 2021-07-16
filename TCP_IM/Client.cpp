@@ -4,14 +4,13 @@
  * Date: 2021 / 7 / 9
  ******************/
 
+#include "Serialize.h"
 #include <iostream>
 #include <stdio.h>
-#include <string>
 #include <thread>
 #include <winsock2.h>
 using std::cin;
 using std::getline;
-using std::string;
 using std::thread;
 
 #pragma comment(lib, "ws2_32.lib")
