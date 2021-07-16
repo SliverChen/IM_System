@@ -4,7 +4,7 @@
  * Date: 2021 / 7 / 9
  ******************/
 
-#include "Serialize.h"
+#include "predefined.h"
 #include <iostream>
 #include <stdio.h>
 #include <thread>
@@ -13,12 +13,16 @@ using std::cin;
 using std::getline;
 using std::thread;
 
-#pragma comment(lib, "ws2_32.lib")
-
 class Client
 {
     SOCKET client;
     sockaddr_in serverAddr;
+    struct Package
+    {
+        int header;
+        string mess;
+        Package(int _h, string _m) : header(_h), mess(_m) {}
+    };
 
 public:
     Client();                //Initialize the client socket and startup the wsa
@@ -29,10 +33,9 @@ public:
     void recvMess();         //receive message from server
     void Close();            //close the socket
     void send_heart();       //send heart data to check if the connection is down
-    // friend void recvMess(const Client &); //receive message from server
 
 private:
-    void Send(string data);
+    int Send(string, int);
     void Recv();
 };
 
@@ -94,18 +97,26 @@ void Client::Recv()
 {
     char data[1024];
     int ret;
-    memset(data, 0, sizeof(data));
     while ((ret = recv(client, data, sizeof(data), 0)) <= 0)
     {
-        if (client == INVALID_SOCKET)
-        {
-            printf("stop receiving from server\n");
-            return;
-        }
         Sleep(1);
     }
+
     data[ret] = 0x00;
-    printf("Friend: %s\n", data);
+
+    /*  Unserialize the data  */
+    UnSerial myUnSerial(data);
+    int head = myUnSerial.ReadInt();
+    string str = myUnSerial.ReadString();
+
+    if (head == CLIENT_MESS)
+    {
+        printf("Friend:%s\n", str);
+    }
+    else
+    {
+        Send("1", HEART_MESS);
+    }
 }
 
 void Client::sendMess()
@@ -119,21 +130,27 @@ void Client::sendMess()
             printf("close the connection\n");
             return;
         }
-        Send(data);
+        Send(data, CLIENT_MESS);
     }
 }
 
-void Client::Send(string data)
+int Client::Send(string data, int signal)
 {
-    const char *mess = data.c_str();
+    //Serialize
+    Serial mySerial;
+    mySerial.WriteInt(signal);
+    mySerial.WriteString(data);
+
+    const char *mess = mySerial.getData();
     if (send(client, mess, strlen(mess), 0) == SOCKET_ERROR)
     {
         if (client == INVALID_SOCKET)
             printf("the connection has closed\n");
         else
             printf("can't not send the message,please check the sockAddr information\n");
-        return;
+        return -1;
     }
+    return 1;
 }
 
 void Client::Close()
@@ -146,6 +163,23 @@ void Client::Close()
 
 void Client::send_heart()
 {
+    int time = 0;
+    while (1)
+    {
+        Sleep(100);
+        if (Send("1", HEART_MESS) == -1 && time < 5)
+        {
+            printf("send heart data fail, try to resend the data..\n");
+            time++;
+            Sleep(1900);
+        }
+        else if (time >= 5)
+        {
+            printf("resend fail,closing the connection..\n");
+            Close();
+            return;
+        }
+    }
 }
 
 int main()
@@ -153,10 +187,11 @@ int main()
     Client myclient;
     myclient.InitClient("127.0.0.1");
     myclient.Connect(5005);
-
-    thread t(&Client::recvMess, &myclient);
+    thread t1(&Client::send_heart, &myclient);
+    t1.detach();
+    thread t2(&Client::recvMess, &myclient);
+    t2.detach();
     myclient.sendMess();
     myclient.Close();
-    t.join();
     return 0;
 }
