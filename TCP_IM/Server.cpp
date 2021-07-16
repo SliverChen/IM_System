@@ -4,7 +4,7 @@
  * Date: 2021 / 7 / 9
  * ******************/
 
-#include "Serialize.h"
+#include "predefined.h"
 #include <future>
 #include <iostream>
 #include <stdio.h>
@@ -15,16 +15,6 @@ using std::future;
 using std::getline;
 using std::promise;
 using std::thread;
-
-#pragma comment(lib, "ws2_32.lib")
-
-//heart-package signal
-#define CONNECT_OK 0
-#define CONNECT_CLOSE 1
-
-//data-package signal
-#define MESSAGE 1
-#define HEARTCHECK 0
 
 class Server
 {

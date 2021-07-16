@@ -7,10 +7,10 @@
 #ifndef SERIAL
 #define SERIAL
 
+#pragma once
+
 #include <string>
 using std::string;
-
-#pragma once
 
 class Serial
 {
