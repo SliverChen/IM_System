@@ -619,7 +619,7 @@ Process exited after 0.05104 seconds with return value 0
 请按任意键继续. . .
 ```
 
-![image-20210719112537552](即时通信系统设计——C++.assets/image-20210719112537552.png)
+![image-20210719112537552](D:/DDDData/MarkDownFile/即时通信系统设计——C++.assets/image-20210719112537552.png)
 
 
 
@@ -663,7 +663,7 @@ Process exited after 0.05104 seconds with return value 0
 
 观察当前系统的输出：
 
-![image-2021071912312313](即时通信系统设计——C++.assets/image-2021071912312313.PNG)
+![image-2021071912312313](README.assets/image-2021071912312313.PNG)
 
 
 
