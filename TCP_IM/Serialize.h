@@ -37,6 +37,11 @@ public:
     UnSerial(const char *buff)
         : mbuffer(const_cast<char *>(buff)), pos(0) {}
 
+    void clear()
+    {
+        mbuffer = nullptr;
+        pos = 0;
+    }
     int ReadInt()
     {
         int i = *(mbuffer + pos);

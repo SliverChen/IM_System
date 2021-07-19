@@ -6,23 +6,20 @@
 
 #include "predefined.h"
 #include <iostream>
+#include <mutex>
 #include <stdio.h>
 #include <thread>
 #include <winsock2.h>
 using std::cin;
+using std::cout;
 using std::getline;
+using std::mutex;
 using std::thread;
 
 class Client
 {
     SOCKET client;
     sockaddr_in serverAddr;
-    struct Package
-    {
-        int header;
-        string mess;
-        Package(int _h, string _m) : header(_h), mess(_m) {}
-    };
 
 public:
     Client();                //Initialize the client socket and startup the wsa
@@ -33,6 +30,9 @@ public:
     void recvMess();         //receive message from server
     void Close();            //close the socket
     void send_heart();       //send heart data to check if the connection is down
+
+private:
+    mutex mtx; //thread protection
 
 private:
     int Send(string, int);
@@ -60,10 +60,8 @@ Client::Client()
 
 Client::~Client()
 {
-    if (client != INVALID_SOCKET)
-        closesocket(client);
+    Close();
     WSACleanup();
-    printf("client has disconnected\n");
 }
 
 void Client::InitClient(string ip)
@@ -87,36 +85,34 @@ void Client::recvMess()
 {
     while (1)
     {
-        if (client == INVALID_SOCKET)
-            break;
         Recv();
     }
 }
 
 void Client::Recv()
 {
-    char data[1024];
+    char data[DATASIZE];
     int ret;
-    while ((ret = recv(client, data, sizeof(data), 0)) <= 0)
+    while ((ret = recv(client, data, DATASIZE, 0)) <= 0)
     {
         Sleep(1);
     }
+    printf("receive the data where ret is %d\n", ret);
 
-    data[ret] = 0x00;
+    /* UnSerial the data */
+    UnSerial myunSerial(data);
+    int head = myunSerial.ReadInt();
+    string str = myunSerial.ReadString();
 
-    /*  Unserialize the data  */
-    UnSerial myUnSerial(data);
-    int head = myUnSerial.ReadInt();
-    string str = myUnSerial.ReadString();
-
-    if (head == CLIENT_MESS)
+    if (head == HEART_MESS)
     {
-        printf("Friend:%s\n", str);
+        cout << "connection is OK\n";
     }
     else
     {
-        Send("1", HEART_MESS);
+        printf("Friend:%s\n", str.c_str());
     }
+    myunSerial.clear();
 }
 
 void Client::sendMess()
@@ -125,7 +121,7 @@ void Client::sendMess()
     {
         string data;
         getline(cin, data);
-        if (data == "./exit")
+        if (data == "./exit\0")
         {
             printf("close the connection\n");
             return;
@@ -142,14 +138,21 @@ int Client::Send(string data, int signal)
     mySerial.WriteString(data);
 
     const char *mess = mySerial.getData();
-    if (send(client, mess, strlen(mess), 0) == SOCKET_ERROR)
+    int ret = send(client, mess, strlen(mess), 0);
+    if (ret == SOCKET_ERROR)
     {
         if (client == INVALID_SOCKET)
             printf("the connection has closed\n");
         else
-            printf("can't not send the message,please check the sockAddr information\n");
+            printf("can't send the message,please check the sockAddr information\n");
         return -1;
     }
+
+    printf("doing send successfully, which ret is %d\n", ret);
+
+    if (signal == CLIENT_MESS)
+        printf("the main thread: send successfully, which ret is %d \n", ret);
+
     return 1;
 }
 
@@ -166,18 +169,23 @@ void Client::send_heart()
     int time = 0;
     while (1)
     {
-        Sleep(100);
-        if (Send("1", HEART_MESS) == -1 && time < 5)
+        Sleep(5000);
+        int ret = Send(HEART_DATA, HEART_MESS);
+        if (ret == -1 && time < 5)
         {
             printf("send heart data fail, try to resend the data..\n");
             time++;
-            Sleep(1900);
+            Sleep(5000);
         }
         else if (time >= 5)
         {
             printf("resend fail,closing the connection..\n");
             Close();
             return;
+        }
+        else
+        {
+            printf("heart thread: send successfully, which ret is %d \n", ret);
         }
     }
 }

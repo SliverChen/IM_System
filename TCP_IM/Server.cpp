@@ -7,12 +7,15 @@
 #include "predefined.h"
 #include <future>
 #include <iostream>
+#include <mutex>
 #include <stdio.h>
 #include <thread>
 #include <winsock2.h>
 using std::cin;
+using std::cout;
 using std::future;
 using std::getline;
+using std::mutex;
 using std::promise;
 using std::thread;
 
@@ -22,11 +25,6 @@ class Server
     SOCKET client;
     sockaddr_in serverAddr;
     sockaddr_in clientAddr;
-    struct Package
-    {
-        int header;
-        string mess;
-    };
 
 public:
     Server();                  //initialize socket(including wsa)
@@ -37,14 +35,17 @@ public:
     void recvMess();           //receive message from client
     void Close();              //close the connection
     void send_heart();         //send heart data check if the connection is down
+    bool isClosed(SOCKET);     //check client socket if is down
 
 private:
     bool isConnected;       //check if is connected
     future<int> fuResult;   //thread connection
     promise<int> myPromise; //set the data structure of the heart-data
+    mutex mtx;              //thread protection
+
 private:
     void Recv();
-    void Send(Package);
+    int Send(string, int);
 };
 
 Server::Server()
@@ -63,20 +64,13 @@ Server::Server()
         perror("socket");
         return;
     }
-    isConnected = false;
-    fuResult = myPromise.get_future();
     printf("init Server socket successfully\n");
 }
 
 Server::~Server()
 {
-    if (server != INVALID_SOCKET)
-    {
-        closesocket(server);
-        isConnected = false;
-    }
+    Close();
     WSACleanup();
-    printf("Server has disconnected\n");
 }
 
 void Server::InitServer(int port)
@@ -105,8 +99,6 @@ void Server::Listen()
         perror("connect");
         return;
     }
-    isConnected = true;
-    myPromise.set_value(CONNECT_OK);
     printf("successfully connect with %s \r\n", inet_ntoa(clientAddr.sin_addr));
 }
 
@@ -114,89 +106,95 @@ void Server::sendMess()
 {
     while (1)
     {
-        if (!isConnected || fuResult.get() == CONNECT_CLOSE)
-        {
-            printf("the connection has shut\n");
-            return;
-        }
         string data;
         getline(cin, data);
 
-        if (data == "./exit")
+        if (data == "./exit\0")
         {
             printf("close the connection\n");
             return;
         }
-        Package package;
-        package.header = MESSAGE;
-        package.mess = data;
-        Send(package);
+        Send(data, CLIENT_MESS);
     }
 }
 
-void Server::Send(Package myPackage)
+int Server::Send(string data, int signal)
 {
-    string data = myPackage.mess;
-    const char *mess = data.c_str();
-    if (send(client, mess, strlen(mess), 0) == SOCKET_ERROR)
+    /*  Serialize  */
+    Serial mySerial;
+    mySerial.WriteInt(signal);
+    mySerial.WriteString(data);
+
+    const char *mess = mySerial.getData();
+    int ret = send(client, mess, strlen(mess), 0);
+    if (ret == SOCKET_ERROR)
     {
         if (client == INVALID_SOCKET)
             printf("the connection has closed\n");
         else
-            printf("can't not send the message,please check the sockAddr information\n");
-        return;
+            printf("can't send the message,please check the sockAddr information\n");
+        return -1;
     }
+    printf("send successfully, which ret is %d\n", ret);
+    return 1;
 }
 
 void Server::recvMess()
 {
     while (1)
     {
-        if (fuResult.get() == CONNECT_CLOSE)
-        {
-            printf("the connection has shut\n");
-            return;
-        }
         Recv();
     }
 }
 
 void Server::Recv()
 {
-    char data[1024];
+    char data[DATASIZE];
     int ret;
-    memset(data, 0, sizeof(data));
-    while ((ret = recv(client, data, sizeof(data), 0)) <= 0)
+
+    while ((ret = recv(client, data, DATASIZE, 0)) <= 0)
     {
-        if (server == INVALID_SOCKET)
-        {
-            printf("stop receiving from client\n");
-            return;
-        }
         Sleep(1);
     }
-    data[ret] = 0x00;
-    printf("Friend: %s\n", data);
+
+    printf("receive the data where ret is %d\n", ret);
+
+    /*  Unserialize the data  */
+    UnSerial myunSerial(data);
+    int head = myunSerial.ReadInt();
+    string str = myunSerial.ReadString();
+
+    if (head == HEART_MESS)
+    {
+        cout << "get the heart mess: " << str << "\n";
+        Send(HEART_DATA, HEART_MESS);
+    }
+    else
+    {
+        printf("Friend:%s\n", str.c_str());
+    }
+    myunSerial.clear();
 }
 
 void Server::Close()
 {
     if (server != INVALID_SOCKET)
         closesocket(server);
-    isConnected = false;
-    myPromise.set_value(1);
 }
 
-void Server::send_heart()
+bool Server::isClosed(SOCKET client)
 {
-    const char data[1024] = "check\0";
-    while (send(client, data, strlen(data), 0) != SOCKET_ERROR)
-    {
-        //need to check errno
-        Sleep(1000);
-    }
-    isConnected = false;
-    myPromise.set_value(CONNECT_CLOSE);
+    char buff[32];
+    int recvBytes = recv(client, buff, sizeof(buff), MSG_PEEK);
+    int sockErr = errno;
+
+    if (recvBytes > 0)
+        return false;
+
+    if (recvBytes == -1 && sockErr == EWOULDBLOCK)
+        return false;
+
+    return true;
 }
 
 int main()
@@ -204,10 +202,8 @@ int main()
     Server myServer;
     myServer.InitServer(5005);
     myServer.Listen();
-    thread t1(&Server::recvMess, &myServer);
-    t1.detach();
-    thread t2(&Server::send_heart, &myServer);
-    t2.detach();
+    thread t(&Server::recvMess, &myServer);
+    t.detach();
     myServer.sendMess();
     myServer.Close();
     return 0;
