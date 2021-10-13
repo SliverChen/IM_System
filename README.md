@@ -228,7 +228,7 @@ class Server
 	private:
 		void recv();
 };
-void recvMess()
+void Server::recvMess()
 {
     while(1)
     {
